@@ -6,7 +6,10 @@ RUN apk add --no-cache git
 
 RUN git clone https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
     cd /tmp/gitnexus && \
-    git checkout v{{VERSION}}
+    git checkout {{VERSION}} && \
+    mv gitnexus-web /app
+
+WORKDIR /app
 
 RUN npm install
 

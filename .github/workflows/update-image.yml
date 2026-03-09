@@ -143,6 +143,16 @@ jobs:
             echo "Force build enabled, skipping existing image check"
           fi
 
+          # Check if the tag exists upstream, if not fallback to latest release
+          if ! git ls-remote --tags https://github.com/${{ env.UPSTREAM_REPO }.git "v$LATEST_VERSION" 2>/dev/null | grep -q .; then
+            echo "Tag v$LATEST_VERSION not found, fetching latest release..."
+            LATEST_RELEASE=$(gh api "repos/${{ env.UPSTREAM_REPO }}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "")
+            if [ -n "$LATEST_RELEASE" ]; then
+              LATEST_VERSION="${LATEST_RELEASE#v}"
+              echo "Using latest release: $LATEST_VERSION"
+            fi
+          fi
+
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
           sed -i "s/{{SERVICE_PORT}}/${{ env.SERVICE_PORT }}/g" Dockerfile

@@ -16,7 +16,7 @@ application:
       backend: http://gitnexus:5173/
 services:
   gitnexus:
-    image: registry.lazycat.cloud/{{USERNAME}}/gitnexus-web:v1.3.11
+    image: registry.lazycat.cloud/lazycat/gitnexus-web:v1.3.11
     environment:
       NODE_ENV: production
     binds:

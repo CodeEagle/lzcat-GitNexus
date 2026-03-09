@@ -116,10 +116,6 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install lzc-cli
-        if: steps.check-update.outputs.update_needed == 'true'
-        run: npm install -g @lazycatcloud/lzc-cli
-
       - name: Build and push image
         if: steps.check-update.outputs.update_needed == 'true'
         id: build-image
@@ -129,16 +125,6 @@ jobs:
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
 
           echo "Building from custom Dockerfile..."
-
-          # Check if the tag exists upstream, if not fallback to latest release
-          if ! git ls-remote --tags "https://github.com/${{ env.UPSTREAM_REPO }}.git" "v$LATEST_VERSION" 2>/dev/null | grep -q .; then
-            echo "Tag v$LATEST_VERSION not found, fetching latest release..."
-            LATEST_RELEASE=$(gh api "repos/${{ env.UPSTREAM_REPO }}/releases/latest" --jq '.tag_name' 2>/dev/null || echo "")
-            if [ -n "$LATEST_RELEASE" ]; then
-              LATEST_VERSION="${LATEST_RELEASE#v}"
-              echo "Using latest release: $LATEST_VERSION"
-            fi
-          fi
 
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
@@ -154,13 +140,11 @@ jobs:
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Update manifest
+      - name: Update manifest version
         if: steps.check-update.outputs.update_needed == 'true'
         run: |
           LATEST_VERSION="${{ steps.build-image.outputs.version }}"
-
           sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
-
           echo "Updated to version: $LATEST_VERSION"
 
       - name: Build package
@@ -168,48 +152,20 @@ jobs:
         env:
           LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
         run: |
-          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk
-
-      - name: Publish to LazyCat App Store
-        if: steps.check-update.outputs.update_needed == 'true' && inputs.publish_to_store == true
-        env:
-          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
-        run: |
-          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
-          RELEASE_NOTES=$(cat /tmp/release_notes.txt)
-
-          lzc-cli appstore publish ${{ env.PROJECT_NAME_LOWER }}.lpk --clang en -c "$RELEASE_NOTES"
+          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk || true
 
       - name: Create GitHub Release
         if: steps.check-update.outputs.update_needed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
-
-          gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
-
-          gh release create "v$LATEST_VERSION" \
-            --title "v$LATEST_VERSION" \
-            --notes-file /tmp/release_notes.txt \
-            ${{ env.PROJECT_NAME_LOWER }}.lpk
-
-      - name: Commit and push changes
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-        run: |
-          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
-
-          FILE_SHA=$(gh api repos/${{ github.repository }}/contents/lzc-manifest.yml --jq '.sha' 2>/dev/null || echo "")
-
-          if [ -z "$FILE_SHA" ]; then
-            echo "Failed to get file SHA"
-            exit 1
+          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
+          lpkg_file="${{ env.PROJECT_NAME_LOWER }}.lpk"
+          
+          if [ -f "$lpkg_file" ]; then
+            gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
+            gh release create "v$LATEST_VERSION" \
+              --title "v$LATEST_VERSION" \
+              --notes-file /tmp/release_notes.txt \
+              "$lpkg_file"
           fi
-
-          gh api -X PUT repos/${{ github.repository }}/contents/lzc-manifest.yml \
-            -f message="Update ${{ env.PROJECT_NAME }} to version $LATEST_VERSION" \
-            -f content="$(base64 -w 0 lzc-manifest.yml)" \
-            -f sha="$FILE_SHA" \
-            -f branch="${{ github.ref_name }}"

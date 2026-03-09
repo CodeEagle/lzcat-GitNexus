@@ -1,0 +1,229 @@
+name: Update GitNexus Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force build even if no new version'
+        required: false
+        default: false
+        type: boolean
+      target_version:
+        description: 'Target version to build (e.g., 1.3.11). Leave empty for latest.'
+        required: false
+        default: ''
+        type: string
+      publish_to_store:
+        description: 'Publish to LazyCat App Store'
+        required: false
+        default: false
+        type: boolean
+  schedule:
+    - cron: '0 */6 * * *'
+
+env:
+  UPSTREAM_REPO: abhigyanpatwari/GitNexus
+  PROJECT_NAME: GitNexus
+  PROJECT_NAME_LOWER: gitnexus
+  OFFICIAL_IMAGE_REGISTRY: ''
+  PRECOMPILED_BINARY_URL: ''
+  DOCKERFILE_TYPE: custom
+  SERVICE_PORT: '5173'
+  SERVICE_CMD: '["serve", "-s", "dist", "-l", "5173"]'
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest package version
+        id: get-version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TARGET_VERSION="${{ inputs.target_version }}"
+          LATEST_VERSION=""
+          RELEASE_NOTES=""
+
+          if [ -n "$TARGET_VERSION" ]; then
+            LATEST_VERSION="$TARGET_VERSION"
+            echo "Using specified version: $LATEST_VERSION"
+          else
+            echo "Checking for latest release..."
+            RELEASE_RESPONSE=$(gh api "repos/${{ env.UPSTREAM_REPO }}/releases/latest" 2>&1 || true)
+            if echo "$RELEASE_RESPONSE" | jq -e '.tag_name' >/dev/null 2>&1; then
+              RELEASE_TAG=$(echo "$RELEASE_RESPONSE" | jq -r '.tag_name')
+              LATEST_VERSION="${RELEASE_TAG#v}"
+              RELEASE_NOTES=$(echo "$RELEASE_RESPONSE" | jq -r '.body // empty')
+              echo "Found release version: $LATEST_VERSION"
+            fi
+
+            if [ -z "$LATEST_VERSION" ]; then
+              echo "Checking for latest tag..."
+              TAGS_RESPONSE=$(gh api "repos/${{ env.UPSTREAM_REPO }}/tags?per_page=1" 2>&1 || true)
+              if echo "$TAGS_RESPONSE" | jq -e '.[0].name' >/dev/null 2>&1; then
+                LATEST_TAG=$(echo "$TAGS_RESPONSE" | jq -r '.[0].name')
+                LATEST_VERSION="${LATEST_TAG#v}"
+                RELEASE_NOTES="Build from tag $LATEST_TAG"
+                echo "Found tag version: $LATEST_VERSION"
+              fi
+            fi
+
+            if [ -z "$LATEST_VERSION" ]; then
+              LATEST_VERSION="1.3.11"
+              RELEASE_NOTES="Auto build from main branch"
+              echo "Using fallback version: $LATEST_VERSION"
+            fi
+          fi
+
+          echo "Final version: $LATEST_VERSION"
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "${RELEASE_NOTES:-Build version $LATEST_VERSION}" > /tmp/release_notes.txt
+          echo "release_notes_file=/tmp/release_notes.txt" >> $GITHUB_OUTPUT
+
+      - name: Check if update needed
+        id: check-update
+        run: |
+          CURRENT_IMAGE=$(grep 'image:' lzc-manifest.yml | head -1 | awk '{print $2}')
+          echo "Current image: $CURRENT_IMAGE"
+
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+          FORCE_BUILD="${{ inputs.force_build }}"
+          TARGET_VERSION="${{ inputs.target_version }}"
+
+          if [ -n "$TARGET_VERSION" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "Target version specified: $TARGET_VERSION"
+          elif [ "$FORCE_BUILD" = "true" ]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "Force build requested"
+          elif [ -n "$LATEST_VERSION" ] && [[ "$CURRENT_IMAGE" != *"$LATEST_VERSION"* ]]; then
+            echo "update_needed=true" >> $GITHUB_OUTPUT
+            echo "New version available: $LATEST_VERSION"
+          else
+            echo "update_needed=false" >> $GITHUB_OUTPUT
+            echo "Already on latest version"
+          fi
+
+      - name: Setup Node.js
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install lzc-cli
+        if: steps.check-update.outputs.update_needed == 'true'
+        run: npm install -g @lazycatcloud/lzc-cli
+
+      - name: Build and push image
+        if: steps.check-update.outputs.update_needed == 'true'
+        id: build-image
+        env:
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+
+          echo "Building from custom Dockerfile..."
+
+          if [ "${{ inputs.force_build }}" != "true" ]; then
+            EXISTING_IMAGE=$(lzc-cli appstore my-images 2>&1 | grep "$LATEST_VERSION" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || echo "")
+
+            if [ -n "$EXISTING_IMAGE" ]; then
+              echo "Found existing image: $EXISTING_IMAGE"
+              echo "accelerated_url=$EXISTING_IMAGE" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+          else
+            echo "Force build enabled, skipping existing image check"
+          fi
+
+          cp Dockerfile.template Dockerfile
+          sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
+          sed -i "s/{{SERVICE_PORT}}/${{ env.SERVICE_PORT }}/g" Dockerfile
+
+          LOCAL_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ env.PROJECT_NAME_LOWER }}:$LATEST_VERSION"
+          LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
+          docker build -t "$LOCAL_IMAGE" .
+
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
+          docker push "$LOCAL_IMAGE"
+
+          COPY_OUTPUT=$(lzc-cli appstore copy-image "$LOCAL_IMAGE" 2>&1)
+          echo "$COPY_OUTPUT"
+          ACCELERATED_URL=$(echo "$COPY_OUTPUT" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || echo "")
+
+          if [ -z "$ACCELERATED_URL" ]; then
+            echo "Failed to get accelerated URL"
+            exit 1
+          fi
+
+          echo "accelerated_url=$ACCELERATED_URL" >> $GITHUB_OUTPUT
+
+      - name: Update manifest
+        if: steps.check-update.outputs.update_needed == 'true'
+        run: |
+          ACCELERATED_URL="${{ steps.build-image.outputs.accelerated_url }}"
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+
+          sed -i "s|image:.*|image: $ACCELERATED_URL|g" lzc-manifest.yml
+          sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
+
+          echo "Updated to version: $LATEST_VERSION"
+          echo "Updated image: $ACCELERATED_URL"
+
+      - name: Build package
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
+        run: |
+          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk
+
+      - name: Publish to LazyCat App Store
+        if: steps.check-update.outputs.update_needed == 'true' && inputs.publish_to_store == true
+        env:
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+          RELEASE_NOTES=$(cat /tmp/release_notes.txt)
+
+          lzc-cli appstore publish ${{ env.PROJECT_NAME_LOWER }}.lpk --clang en -c "$RELEASE_NOTES"
+
+      - name: Create GitHub Release
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+
+          gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
+
+          gh release create "v$LATEST_VERSION" \
+            --title "v$LATEST_VERSION" \
+            --notes-file /tmp/release_notes.txt \
+            ${{ env.PROJECT_NAME_LOWER }}.lpk
+
+      - name: Commit and push changes
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
+
+          FILE_SHA=$(gh api repos/${{ github.repository }}/contents/lzc-manifest.yml --jq '.sha' 2>/dev/null || echo "")
+
+          if [ -z "$FILE_SHA" ]; then
+            echo "Failed to get file SHA"
+            exit 1
+          fi
+
+          gh api -X PUT repos/${{ github.repository }}/contents/lzc-manifest.yml \
+            -f message="Update ${{ env.PROJECT_NAME }} to version $LATEST_VERSION" \
+            -f content="$(base64 -w 0 lzc-manifest.yml)" \
+            -f sha="$FILE_SHA" \
+            -f branch="${{ github.ref_name }}"

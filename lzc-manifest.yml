@@ -22,9 +22,12 @@ services:
       - BIND=0.0.0.0
     binds:
       - /lzcapp/var/data:/data
-    setup_script: |
-      mkdir -p /lzcapp/var/data
-      chown -R appuser:appuser /lzcapp/var/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5173/"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 locales:
   en:
     name: GitNexus

@@ -29,4 +29,4 @@ EXPOSE {{SERVICE_PORT}}
 ENV HOST=0.0.0.0
 ENV PORT={{SERVICE_PORT}}
 
-CMD ["serve", "-s", "dist", "-l", "{{SERVICE_PORT}}", "--header", "Cross-Origin-Opener-Policy: same-origin", "--header", "Cross-Origin-Embedder-Policy: require-corp"]
+CMD ["serve", "-s", "dist", "-l", "{{SERVICE_PORT}}"]

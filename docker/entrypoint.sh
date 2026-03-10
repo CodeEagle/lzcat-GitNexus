@@ -7,10 +7,9 @@ echo "Starting GitNexus services..."
 mkdir -p /root/.gitnexus
 
 # 启动前端静态文件服务 (端口 5173)
+# Note: serve doesn't support --header flag, headers are handled by nginx
 echo "Starting frontend server on port 5173..."
-serve -s dist -l 5173 \
-    --header "Cross-Origin-Opener-Policy: same-origin" \
-    --header "Cross-Origin-Embedder-Policy: require-corp" &
+serve -s dist -l 5173 &
 
 # 等待前端启动
 sleep 2

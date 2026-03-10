@@ -1,9 +1,11 @@
 # ============================================
 # Stage 1: Build frontend
 # ============================================
-FROM node:20-alpine AS builder
+# Use Debian-based image for glibc compatibility
+# gitnexus CLI's kuzu native module requires glibc (not musl)
+FROM node:20 AS builder
 
-RUN apk add --no-cache git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 
 # Clone and build GitNexus web UI
 RUN git clone --depth 1 --branch v1.3.11 https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
@@ -17,18 +19,12 @@ RUN npm run build
 # ============================================
 # Stage 2: Runtime image with gitnexus CLI + nginx
 # ============================================
-FROM node:20-alpine
+FROM node:20
 
 WORKDIR /app
 
-# Install dependencies (including python for gitnexus native modules)
-RUN apk add --no-cache \
-    nginx \
-    curl \
-    git \
-    python3 \
-    make \
-    g++
+# Install nginx and curl
+RUN apt-get update && apt-get install -y nginx curl && rm -rf /var/lib/apt/lists/*
 
 # Install global npm packages
 RUN npm install -g serve gitnexus@1.3.11

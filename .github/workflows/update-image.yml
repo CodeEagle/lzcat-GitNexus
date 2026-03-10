@@ -110,11 +110,9 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build and push image
+      - name: Build image
         if: steps.check-update.outputs.update_needed == 'true'
         id: build-image
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
 
@@ -128,38 +126,5 @@ jobs:
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
           docker build -t "$LOCAL_IMAGE" .
 
-          echo "$GITHUB_TOKEN" | docker login ghcr.io -u ${{ github.repository_owner }} --password-stdin
-          docker push "$LOCAL_IMAGE"
-
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Update manifest version
-        if: steps.check-update.outputs.update_needed == 'true'
-        run: |
-          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
-          sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
-          echo "Updated to version: $LATEST_VERSION"
-
-      - name: Build package
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
-        run: |
-          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk || true
-
-      - name: Create GitHub Release
-        if: steps.check-update.outputs.update_needed == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
-          lpkg_file="${{ env.PROJECT_NAME_LOWER }}.lpk"
-          
-          if [ -f "$lpkg_file" ]; then
-            gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
-            gh release create "v$LATEST_VERSION" \
-              --title "v$LATEST_VERSION" \
-              --notes-file /tmp/release_notes.txt \
-              "$lpkg_file"
-          fi

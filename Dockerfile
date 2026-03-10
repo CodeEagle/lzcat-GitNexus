@@ -3,13 +3,13 @@
 # ============================================
 FROM node:20-alpine AS builder
 
-WORKDIR /app
-
 RUN apk add --no-cache git
 
 # Clone and build GitNexus web UI
 RUN git clone --depth 1 --branch v1.3.11 https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
     mv /tmp/gitnexus/gitnexus-web /app
+
+WORKDIR /app
 
 RUN npm install
 RUN npm run build

@@ -9,11 +9,10 @@ homepage: https://github.com/abhigyanpatwari/GitNexus
 author: abhigyanpatwari
 application:
   subdomain: gitnexus
-  public_path:
-    - /
   upstreams:
     - location: /
       backend: http://gitnexus:5173/
+      disable_trim_location: true
 services:
   gitnexus:
     image: registry.lazycat.cloud/invokerlaw/codeeagle/lzcat-gitnexus:9196b19975f18d73

@@ -28,8 +28,7 @@ env:
   OFFICIAL_IMAGE_REGISTRY: ''
   PRECOMPILED_BINARY_URL: ''
   DOCKERFILE_TYPE: custom
-  SERVICE_PORT: '5173'
-  SERVICE_CMD: '["serve", "-s", "dist", "-l", "5173"]'
+  SERVICE_PORT: '8080'
 
 jobs:
   check-and-update:
@@ -134,7 +133,6 @@ jobs:
 
           cp Dockerfile.template Dockerfile
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
-          sed -i "s/{{SERVICE_PORT}}/${{ env.SERVICE_PORT }}/g" Dockerfile
 
           LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')

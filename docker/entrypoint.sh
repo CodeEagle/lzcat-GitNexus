@@ -1,0 +1,30 @@
+#!/bin/sh
+set -e
+
+echo "Starting GitNexus services..."
+
+# 创建 gitnexus registry 目录
+mkdir -p /root/.gitnexus
+
+# 启动前端静态文件服务 (端口 5173)
+echo "Starting frontend server on port 5173..."
+serve -s dist -l 5173 \
+    --header "Cross-Origin-Opener-Policy: same-origin" \
+    --header "Cross-Origin-Embedder-Policy: require-corp" &
+
+# 等待前端启动
+sleep 2
+
+# 启动 gitnexus 后端服务 (端口 4747)
+echo "Starting gitnexus backend on port 4747..."
+gitnexus serve --host 0.0.0.0 --port 4747 &
+
+# 等待后端启动
+sleep 2
+
+# 启动 nginx 代理 (端口 8080)
+echo "Starting nginx proxy on port 8080..."
+nginx -g 'daemon off;'
+
+# 保持容器运行
+wait

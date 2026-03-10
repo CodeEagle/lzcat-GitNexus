@@ -127,7 +127,6 @@ jobs:
         id: build-image
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
         run: |
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
 
@@ -137,23 +136,14 @@ jobs:
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
           sed -i "s/{{SERVICE_PORT}}/${{ env.SERVICE_PORT }}/g" Dockerfile
 
-          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:${LATEST_VERSION}"
+          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:v${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
 
           docker build -t "$LOCAL_IMAGE" .
 
           docker push "$LOCAL_IMAGE"
 
-          COPY_OUTPUT=$(lzc-cli appstore copy-image "$LOCAL_IMAGE" 2>&1)
-          echo "$COPY_OUTPUT"
-          ACCELERATED_URL=$(echo "$COPY_OUTPUT" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || true)
-
-          if [ -z "$ACCELERATED_URL" ]; then
-            echo "Failed to obtain LazyCat registry image"
-            exit 1
-          fi
-
-          echo "accelerated_url=$ACCELERATED_URL" >> $GITHUB_OUTPUT
+          echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update manifest version

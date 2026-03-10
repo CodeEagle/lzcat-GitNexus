@@ -18,9 +18,13 @@ services:
   gitnexus:
     image: registry.lazycat.cloud/invokerlaw/codeeagle/lzcat-gitnexus:5697cf82bc1d435e
     environment:
-      NODE_ENV: production
+      - NODE_ENV=production
+      - BIND=0.0.0.0
     binds:
-      - /data:/data
+      - /lzcapp/var/data:/data
+    setup_script: |
+      mkdir -p /lzcapp/var/data
+      chown -R appuser:appuser /lzcapp/var/data
 locales:
   en:
     name: GitNexus

@@ -110,9 +110,24 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Build image
+      - name: Install lzc-cli
+        if: steps.check-update.outputs.update_needed == 'true'
+        run: npm install -g @lazycatcloud/lzc-cli
+
+      - name: Login to GHCR
+        if: steps.check-update.outputs.update_needed == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
         if: steps.check-update.outputs.update_needed == 'true'
         id: build-image
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
         run: |
           LATEST_VERSION="${{ steps.get-version.outputs.latest_version }}"
 
@@ -122,9 +137,52 @@ jobs:
           sed -i "s/{{VERSION}}/v$LATEST_VERSION/g" Dockerfile
           sed -i "s/{{SERVICE_PORT}}/${{ env.SERVICE_PORT }}/g" Dockerfile
 
-          LOCAL_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ env.PROJECT_NAME_LOWER }}:$LATEST_VERSION"
+          LOCAL_IMAGE="ghcr.io/${{ github.repository }}:${LATEST_VERSION}"
           LOCAL_IMAGE=$(echo "$LOCAL_IMAGE" | tr '[:upper:]' '[:lower:]')
+
           docker build -t "$LOCAL_IMAGE" .
 
-          echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
+          docker push "$LOCAL_IMAGE"
+
+          COPY_OUTPUT=$(lzc-cli appstore copy-image "$LOCAL_IMAGE" 2>&1)
+          echo "$COPY_OUTPUT"
+          ACCELERATED_URL=$(echo "$COPY_OUTPUT" | grep -oE 'registry\.lazycat\.cloud/[a-zA-Z0-9_/.:-]+' | head -1 || true)
+
+          if [ -z "$ACCELERATED_URL" ]; then
+            echo "Failed to obtain LazyCat registry image"
+            exit 1
+          fi
+
+          echo "accelerated_url=$ACCELERATED_URL" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Update manifest version
+        if: steps.check-update.outputs.update_needed == 'true'
+        run: |
+          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
+          ACCELERATED_URL="${{ steps.build-image.outputs.accelerated_url }}"
+          sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
+          sed -i "s|image: .*|image: $ACCELERATED_URL|g" lzc-manifest.yml
+
+      - name: Build package
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          LZC_CLI_TOKEN: ${{ secrets.LZC_CLI_TOKEN }}
+        run: |
+          lzc-cli project build -o ${{ env.PROJECT_NAME_LOWER }}.lpk || true
+
+      - name: Create GitHub Release
+        if: steps.check-update.outputs.update_needed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LATEST_VERSION="${{ steps.build-image.outputs.version }}"
+          lpkg_file="${{ env.PROJECT_NAME_LOWER }}.lpk"
+          
+          if [ -f "$lpkg_file" ]; then
+            gh release delete "v$LATEST_VERSION" --yes 2>/dev/null || true
+            gh release create "v$LATEST_VERSION" \
+              --title "v$LATEST_VERSION" \
+              --notes-file /tmp/release_notes.txt \
+              "$lpkg_file"
+          fi

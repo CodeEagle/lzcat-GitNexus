@@ -1,13 +1,16 @@
 FROM node:20-alpine AS builder
 
-RUN apk add --no-cache git
+RUN apk add --no-cache git python3 make g++
 
 RUN git clone https://github.com/abhigyanpatwari/GitNexus.git /tmp/gitnexus && \
     cd /tmp/gitnexus && \
-    git checkout {{VERSION}} && \
-    mv gitnexus-web /app
+    git checkout {{VERSION}}
 
-WORKDIR /app
+WORKDIR /tmp/gitnexus/gitnexus
+
+RUN npm install -g @anthropic-ai/claude-code tree-sitter-cli typescript
+
+WORKDIR /tmp/gitnexus/gitnexus-web
 
 RUN npm install
 
@@ -17,16 +20,18 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-RUN npm install -g serve
+RUN npm install -g serve gitnexus
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /tmp/gitnexus/gitnexus-web/dist ./dist
+COPY --from=builder /tmp/gitnexus/gitnexus-web/public ./public
+COPY --from=builder /tmp/gitnexus/gitnexus-web/package.json ./package.json
+COPY --from=builder /tmp/gitnexus/gitnexus-web/node_modules ./node_modules
 
-EXPOSE {{SERVICE_PORT}}
+RUN mkdir -p /data
+
+EXPOSE 4747 5173
 
 ENV HOST=0.0.0.0
-ENV PORT={{SERVICE_PORT}}
+ENV PORT=4747
 
-CMD ["serve", "-s", "dist", "-l", "{{SERVICE_PORT}}"]
+CMD sh -c "gitnexus serve --port 4747 & serve -s dist -l 5173"

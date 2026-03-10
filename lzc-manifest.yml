@@ -9,6 +9,9 @@ homepage: https://github.com/abhigyanpatwari/GitNexus
 author: abhigyanpatwari
 application:
   subdomain: gitnexus
+  public_path:
+    - /
+    - /api
   upstreams:
     - location: /
       backend: http://gitnexus:5173/

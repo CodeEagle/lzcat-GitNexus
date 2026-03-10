@@ -21,11 +21,14 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies
+# Install dependencies (including python for gitnexus native modules)
 RUN apk add --no-cache \
     nginx \
     curl \
-    git
+    git \
+    python3 \
+    make \
+    g++
 
 # Install global npm packages
 RUN npm install -g serve gitnexus@1.3.11

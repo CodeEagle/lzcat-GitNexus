@@ -142,6 +142,7 @@ jobs:
           docker push "$LOCAL_IMAGE"
 
           echo "ghcr_image=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
+          echo "accelerated_url=$LOCAL_IMAGE" >> $GITHUB_OUTPUT
           echo "version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
       - name: Update manifest version
@@ -149,8 +150,21 @@ jobs:
         run: |
           LATEST_VERSION="${{ steps.build-image.outputs.version }}"
           ACCELERATED_URL="${{ steps.build-image.outputs.accelerated_url }}"
+          GHCR_IMAGE="${{ steps.build-image.outputs.ghcr_image }}"
+          CURRENT_IMAGE=$(grep 'image:' lzc-manifest.yml | head -1 | awk '{print $2}')
+
+          IMAGE_TO_USE="$ACCELERATED_URL"
+          if [ -z "$IMAGE_TO_USE" ]; then
+            IMAGE_TO_USE="$GHCR_IMAGE"
+          fi
+          if [ -z "$IMAGE_TO_USE" ]; then
+            IMAGE_TO_USE="$CURRENT_IMAGE"
+          fi
+
           sed -i "s/^version:.*/version: $LATEST_VERSION/g" lzc-manifest.yml
-          sed -i "s|image: .*|image: $ACCELERATED_URL|g" lzc-manifest.yml
+          if [ -n "$IMAGE_TO_USE" ]; then
+            sed -i "s|image: .*|image: $IMAGE_TO_USE|g" lzc-manifest.yml
+          fi
 
       - name: Build package
         if: steps.check-update.outputs.update_needed == 'true'
